@@ -7,47 +7,60 @@ import (
 
 const validCC = "4532015112830366"
 
-func TestCheckPIIBlock_SSN(t *testing.T) {
-	if got := CheckPIIBlock("My SSN is 123-45-6789"); got != BlockSSN {
-		t.Fatalf("expected BlockSSN, got %q", got)
+func TestRedact_SSN(t *testing.T) {
+	out := Redact("My SSN is 123-45-6789")
+	if !strings.Contains(out, "[REDACTED_SSN]") {
+		t.Fatalf("ssn not redacted: %q", out)
+	}
+	if strings.Contains(out, "123-45-6789") {
+		t.Fatalf("ssn leaked: %q", out)
 	}
 }
 
-func TestCheckPIIBlock_Unformatted9DigitsNotBlocked(t *testing.T) {
-	if got := CheckPIIBlock("number 123456789"); got != "" {
-		t.Fatalf("expected no block on bare 9-digit string, got %q", got)
+func TestRedact_Unformatted9DigitsNotRedacted(t *testing.T) {
+	out := Redact("number 123456789")
+	if strings.Contains(out, "[REDACTED_SSN]") {
+		t.Fatalf("bare 9-digit string should not match SSN: %q", out)
 	}
 }
 
-func TestCheckPIIBlock_ValidLuhnCC(t *testing.T) {
-	if got := CheckPIIBlock("Card: " + validCC); got != BlockCreditCard {
-		t.Fatalf("expected BlockCreditCard, got %q", got)
+func TestRedact_ValidLuhnCC(t *testing.T) {
+	out := Redact("Card: " + validCC)
+	if !strings.Contains(out, "[REDACTED_CREDIT_CARD]") {
+		t.Fatalf("valid CC not redacted: %q", out)
+	}
+	if strings.Contains(out, validCC) {
+		t.Fatalf("CC leaked: %q", out)
 	}
 }
 
-func TestCheckPIIBlock_LuhnCCDashed(t *testing.T) {
+func TestRedact_LuhnCCDashed(t *testing.T) {
 	dashed := validCC[:4] + "-" + validCC[4:8] + "-" + validCC[8:12] + "-" + validCC[12:]
-	if got := CheckPIIBlock("Card: " + dashed); got != BlockCreditCard {
-		t.Fatalf("expected dashed CC block, got %q", got)
+	out := Redact("Card: " + dashed)
+	if !strings.Contains(out, "[REDACTED_CREDIT_CARD]") {
+		t.Fatalf("dashed CC not redacted: %q", out)
 	}
 }
 
-func TestCheckPIIBlock_LuhnCCSpaced(t *testing.T) {
+func TestRedact_LuhnCCSpaced(t *testing.T) {
 	spaced := validCC[:4] + " " + validCC[4:8] + " " + validCC[8:12] + " " + validCC[12:]
-	if got := CheckPIIBlock("Card: " + spaced); got != BlockCreditCard {
-		t.Fatalf("expected spaced CC block, got %q", got)
+	out := Redact("Card: " + spaced)
+	if !strings.Contains(out, "[REDACTED_CREDIT_CARD]") {
+		t.Fatalf("spaced CC not redacted: %q", out)
 	}
 }
 
-func TestCheckPIIBlock_InvalidLuhnNotBlocked(t *testing.T) {
-	if got := CheckPIIBlock("Card: 1234567890123456"); got != "" {
-		t.Fatalf("expected non-Luhn CC to NOT block, got %q", got)
+func TestRedact_InvalidLuhnNotRedacted(t *testing.T) {
+	out := Redact("Card: 1234567890123456")
+	if strings.Contains(out, "[REDACTED_CREDIT_CARD]") {
+		t.Fatalf("non-Luhn CC should NOT be redacted: %q", out)
 	}
 }
 
-func TestCheckPIIBlock_ShortDigitNotCC(t *testing.T) {
-	if got := CheckPIIBlock("order #12345"); got != "" {
-		t.Fatalf("expected short digit string to NOT block, got %q", got)
+func TestRedact_ShortDigitNotCC(t *testing.T) {
+	out := Redact("order #12345")
+	if strings.Contains(out, "[REDACTED_CREDIT_CARD]") {
+		t.Fatalf("short digit string should not match CC: %q", out)
 	}
 }
 

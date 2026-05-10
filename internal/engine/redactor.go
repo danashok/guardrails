@@ -3,24 +3,8 @@ package engine
 type BlockKind string
 
 const (
-	BlockSSN             BlockKind = "SSN"
-	BlockCreditCard      BlockKind = "CREDIT_CARD"
 	BlockPromptInjection BlockKind = "PROMPT_INJECTION"
 )
-
-// CheckPIIBlock returns the BlockKind found, or "" if none.
-// Only credit-card matches that pass Luhn count, to keep false positives down.
-func CheckPIIBlock(text string) BlockKind {
-	if ssnRE.MatchString(text) {
-		return BlockSSN
-	}
-	for _, m := range ccRE.FindAllString(text, -1) {
-		if Luhn(m) {
-			return BlockCreditCard
-		}
-	}
-	return ""
-}
 
 // CheckPromptInjection returns BlockPromptInjection on first signature match, else "".
 func CheckPromptInjection(text string) BlockKind {
@@ -33,9 +17,17 @@ func CheckPromptInjection(text string) BlockKind {
 }
 
 // Redact applies all PII redaction rules in order. Order matters:
+// SSN and CC run before phone so their digit patterns are consumed first;
 // the company-domain pattern runs before the bare-word pattern so
 // "tsmc.com" is not partially consumed by the word match.
 func Redact(text string) string {
+	text = ssnRE.ReplaceAllString(text, "[REDACTED_SSN]")
+	text = ccRE.ReplaceAllStringFunc(text, func(m string) string {
+		if Luhn(m) {
+			return "[REDACTED_CREDIT_CARD]"
+		}
+		return m
+	})
 	text = emailRE.ReplaceAllString(text, "[REDACTED_EMAIL]")
 	text = phoneRE.ReplaceAllString(text, "[REDACTED_PHONE]")
 	text = apiKeyRE.ReplaceAllString(text, "[REDACTED_API_KEY]")

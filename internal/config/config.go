@@ -14,7 +14,7 @@ type AppConfig struct {
 	AuditWorkers   int    `env:"AUDIT_WORKERS" envDefault:"4"`
 	AuditBuffer    int    `env:"AUDIT_BUFFER" envDefault:"1024"`
 	MaxConcurrent  int    `env:"MAX_CONCURRENT_CHECKS" envDefault:"32"`
-	MaxBodyBytes   int64  `env:"MAX_BODY_BYTES" envDefault:"262144"`
+	MaxBodyBytes   int64  `env:"MAX_BODY_BYTES" envDefault:"16777216"` // 16 MB
 }
 
 type DBConfig struct {

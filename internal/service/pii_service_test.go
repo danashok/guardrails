@@ -10,7 +10,7 @@ import (
 	"github.com/ashokdan/guardrails/internal/models"
 )
 
-func TestPIIService_BlockTakesPrecedenceOverRedact(t *testing.T) {
+func TestPIIService_SSNRedactedNotBlocked(t *testing.T) {
 	svc := NewPIIService(8)
 	d, err := svc.Evaluate(context.Background(), zap.NewNop(), []string{
 		"email me at a@b.com",
@@ -19,15 +19,20 @@ func TestPIIService_BlockTakesPrecedenceOverRedact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if d.Action != models.ActionBlocked {
-		t.Fatalf("expected BLOCKED, got %s", d.Action)
+	if d.Action != models.ActionIntervened {
+		t.Fatalf("expected GUARDRAIL_INTERVENED, got %s", d.Action)
 	}
-	if !strings.Contains(d.BlockedReason, "SSN") {
-		t.Fatalf("expected SSN in reason, got %q", d.BlockedReason)
+	if len(d.Texts) != 2 {
+		t.Fatalf("expected 2 redacted texts, got %d", len(d.Texts))
 	}
-	// Reason MUST NOT echo the matched SSN.
-	if strings.Contains(d.BlockedReason, "123-45-6789") {
-		t.Fatalf("blocked_reason leaks SSN: %q", d.BlockedReason)
+	if !strings.Contains(d.Texts[0], "[REDACTED_EMAIL]") {
+		t.Errorf("texts[0] not redacted: %q", d.Texts[0])
+	}
+	if !strings.Contains(d.Texts[1], "[REDACTED_SSN]") {
+		t.Errorf("texts[1] not redacted: %q", d.Texts[1])
+	}
+	if strings.Contains(d.Texts[1], "123-45-6789") {
+		t.Fatalf("ssn leaked through redaction: %q", d.Texts[1])
 	}
 }
 
