@@ -22,7 +22,10 @@ func AutoMigrate(gormDB *gorm.DB) error {
 	if err := gormDB.Exec(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`).Error; err != nil {
 		return fmt.Errorf("failed to create uuid-ossp extension: %w", err)
 	}
-	if err := gormDB.AutoMigrate(&models.GuardrailEvent{}); err != nil {
+	if err := gormDB.AutoMigrate(
+		&models.GuardrailEvent{},
+		&models.AuthorizedIP{},
+	); err != nil {
 		return fmt.Errorf("failed to auto-migrate models: %w", err)
 	}
 	return nil

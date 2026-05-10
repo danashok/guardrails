@@ -17,6 +17,9 @@ import (
 const (
 	policyPII             = "pii"
 	policyPromptInjection = "prompt_injection"
+	policyAuthorization   = "authorization"
+
+	authzBlockedReason = "API key not authorized from source IP"
 )
 
 // LiteLLMRequest mirrors the body shape LiteLLM POSTs per generic_guardrail_api spec.
@@ -56,19 +59,21 @@ type LiteLLMResponse struct {
 }
 
 type GuardrailController struct {
-	pii      service.IPIIService
-	prompt   service.IPromptInjectionService
-	audit    service.IGuardrailEventService
-	logger   *zap.Logger
+	pii    service.IPIIService
+	prompt service.IPromptInjectionService
+	authz  service.IAuthorizationService
+	audit  service.IGuardrailEventService
+	logger *zap.Logger
 }
 
 func NewGuardrailController(
 	pii service.IPIIService,
 	prompt service.IPromptInjectionService,
+	authz service.IAuthorizationService,
 	audit service.IGuardrailEventService,
 	logger *zap.Logger,
 ) *GuardrailController {
-	return &GuardrailController{pii: pii, prompt: prompt, audit: audit, logger: logger}
+	return &GuardrailController{pii: pii, prompt: prompt, authz: authz, audit: audit, logger: logger}
 }
 
 // Evaluate godoc
@@ -100,6 +105,44 @@ func (ctrl *GuardrailController) Evaluate(c *gin.Context) {
 	}
 
 	start := time.Now()
+
+	identity := req.RequestData.UserAPIKeyUserID
+	ip, ipSrc := service.ResolveRequesterIP(c, req.RequestHeaders)
+
+	if identity == "" || ip == "" || ipSrc == models.IPSourceDirect {
+		ctrl.logger.Warn("authorization rejected: missing identity or untrusted IP source",
+			zap.String("ntaccount", identity),
+			zap.String("ip_source", string(ipSrc)),
+			zap.String("litellm_call_id", req.LiteLLMCallID),
+		)
+		d := &service.Decision{Action: models.ActionBlocked, BlockedReason: authzBlockedReason}
+		ctrl.recordAudit(c, &req, d, policyAuthorization, time.Since(start))
+		c.JSON(http.StatusOK, LiteLLMResponse{Action: d.Action, BlockedReason: d.BlockedReason})
+		return
+	}
+
+	allowed, authzErr := ctrl.authz.IsAllowed(c.Request.Context(), identity, ip)
+	if authzErr != nil {
+		ctrl.logger.Error("authorization check failed",
+			zap.String("ntaccount", identity),
+			zap.String("litellm_call_id", req.LiteLLMCallID),
+			zap.Error(authzErr),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "authorization check failed"})
+		return
+	}
+	if !allowed {
+		ctrl.logger.Warn("authorization rejected: source IP not in allowlist",
+			zap.String("ntaccount", identity),
+			zap.String("ip", ip),
+			zap.String("litellm_call_id", req.LiteLLMCallID),
+		)
+		d := &service.Decision{Action: models.ActionBlocked, BlockedReason: authzBlockedReason}
+		ctrl.recordAudit(c, &req, d, policyAuthorization, time.Since(start))
+		c.JSON(http.StatusOK, LiteLLMResponse{Action: d.Action, BlockedReason: d.BlockedReason})
+		return
+	}
+
 	var (
 		decision *service.Decision
 		err      error

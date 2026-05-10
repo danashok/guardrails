@@ -32,6 +32,12 @@ func NewRoutes(opts *RouteOptions) (*Routes, error) {
 	piiSvc := service.NewPIIService(opts.Config.AppConfig.MaxConcurrent)
 	promptSvc := service.NewPromptInjectionService(opts.Config.AppConfig.MaxConcurrent)
 
+	authzSvc := service.NewAuthorizationService(
+		repo.AuthorizedIP,
+		opts.Logger,
+		opts.Config.AppConfig.AuthzCacheTTL,
+	)
+
 	auditSvc := service.NewGuardrailEventService(
 		repo.GuardrailEvent,
 		opts.Logger,
@@ -40,7 +46,7 @@ func NewRoutes(opts *RouteOptions) (*Routes, error) {
 		opts.Config.AppConfig.AuditBuffer,
 	)
 
-	gc := controller.NewGuardrailController(piiSvc, promptSvc, auditSvc, opts.Logger)
+	gc := controller.NewGuardrailController(piiSvc, promptSvc, authzSvc, auditSvc, opts.Logger)
 
 	return &Routes{
 		opts:                opts,
