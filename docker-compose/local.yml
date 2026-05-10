@@ -1,0 +1,20 @@
+services:
+  app:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    container_name: guardrails
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - ../.env
+    restart: unless-stopped
+    networks:
+      - litellm-net
+volumes:
+  guardrails_pg_data:
+
+networks:
+  litellm-net:
+    name: litellm-net
+    external: true
