@@ -1,26 +1,13 @@
 package service
 
 import (
-	"net/http/httptest"
 	"testing"
-
-	"github.com/gin-gonic/gin"
 
 	"github.com/ashokdan/guardrails/internal/models"
 )
 
-func newCtx(t *testing.T) *gin.Context {
-	t.Helper()
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("POST", "/x", nil)
-	c.Request.RemoteAddr = "192.0.2.10:1234"
-	return c
-}
-
-func TestResolveRequesterIP_PrefersXFFFirstHop(t *testing.T) {
-	c := newCtx(t)
-	ip, src := ResolveRequesterIP(c, map[string]string{
+func TestResolveRequesterIP_ReturnsXFFFirstHop(t *testing.T) {
+	ip, src := ResolveRequesterIP(map[string]string{
 		"x-forwarded-for": "203.0.113.5, 198.51.100.7",
 		"x-real-ip":       "198.51.100.7",
 	})
@@ -32,33 +19,8 @@ func TestResolveRequesterIP_PrefersXFFFirstHop(t *testing.T) {
 	}
 }
 
-func TestResolveRequesterIP_FallsBackToXRI(t *testing.T) {
-	c := newCtx(t)
-	ip, src := ResolveRequesterIP(c, map[string]string{
-		"x-real-ip": "198.51.100.7",
-	})
-	if ip != "198.51.100.7" {
-		t.Errorf("expected XRI ip, got %q", ip)
-	}
-	if src != models.IPSourceXRI {
-		t.Errorf("expected source xri, got %q", src)
-	}
-}
-
-func TestResolveRequesterIP_FallsBackToDirect(t *testing.T) {
-	c := newCtx(t)
-	ip, src := ResolveRequesterIP(c, nil)
-	if ip != "192.0.2.10" {
-		t.Errorf("expected direct ip 192.0.2.10, got %q", ip)
-	}
-	if src != models.IPSourceDirect {
-		t.Errorf("expected source direct, got %q", src)
-	}
-}
-
 func TestResolveRequesterIP_HeaderCaseInsensitive(t *testing.T) {
-	c := newCtx(t)
-	ip, src := ResolveRequesterIP(c, map[string]string{
+	ip, src := ResolveRequesterIP(map[string]string{
 		"X-Forwarded-For": "203.0.113.5",
 	})
 	if ip != "203.0.113.5" || src != models.IPSourceXFF {
@@ -66,16 +28,35 @@ func TestResolveRequesterIP_HeaderCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestResolveRequesterIP_InvalidIPFallsThrough(t *testing.T) {
-	c := newCtx(t)
-	ip, src := ResolveRequesterIP(c, map[string]string{
+func TestResolveRequesterIP_BlocksWhenXFFMissing(t *testing.T) {
+	ip, _ := ResolveRequesterIP(nil)
+	if ip != "" {
+		t.Errorf("expected empty IP when XFF missing, got %q", ip)
+	}
+
+	ip, _ = ResolveRequesterIP(map[string]string{
+		"x-real-ip": "198.51.100.7",
+	})
+	if ip != "" {
+		t.Errorf("expected empty IP when only XRI present, got %q", ip)
+	}
+}
+
+func TestResolveRequesterIP_BlocksWhenXFFInvalid(t *testing.T) {
+	ip, _ := ResolveRequesterIP(map[string]string{
 		"x-forwarded-for": "not-an-ip",
 		"x-real-ip":       "203.0.113.99",
 	})
-	if ip != "203.0.113.99" {
-		t.Errorf("expected fallback to XRI on invalid XFF, got %q", ip)
+	if ip != "" {
+		t.Errorf("expected empty IP on invalid XFF (no XRI fallback), got %q", ip)
 	}
-	if src != models.IPSourceXRI {
-		t.Errorf("expected source xri on fallback, got %q", src)
+}
+
+func TestResolveRequesterIP_BlocksWhenXFFEmpty(t *testing.T) {
+	ip, _ := ResolveRequesterIP(map[string]string{
+		"x-forwarded-for": "   ",
+	})
+	if ip != "" {
+		t.Errorf("expected empty IP on blank XFF, got %q", ip)
 	}
 }

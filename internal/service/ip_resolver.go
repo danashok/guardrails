@@ -4,35 +4,29 @@ import (
 	"net"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/ashokdan/guardrails/internal/models"
 )
 
-// ResolveRequesterIP picks the most upstream-trustworthy IP available.
-// Order:
-//  1. First hop in request_headers["x-forwarded-for"] (the original client).
-//  2. request_headers["x-real-ip"].
-//  3. Direct connection IP from gin (which is LiteLLM in our deployment).
+// ResolveRequesterIP returns the first hop in request_headers["x-forwarded-for"]
+// — the original client. It is the only accepted source: there is no fallback
+// to x-real-ip or to the direct connection IP, because in our deployment the
+// direct peer is LiteLLM and x-real-ip is not set end-to-end.
 //
-// `forwarded` is the request_headers map sent inside the LiteLLM body —
-// these come from `extra_headers` in config.yaml.
-func ResolveRequesterIP(c *gin.Context, forwarded map[string]string) (string, models.IPSource) {
-	if v := lookup(forwarded, "x-forwarded-for"); v != "" {
-		if first := firstHop(v); first != "" && net.ParseIP(first) != nil {
-			return first, models.IPSourceXFF
-		}
+// Returns "" if the header is missing, empty, or the first hop is not a valid
+// IP. Callers must treat an empty return as a block.
+//
+// `forwarded` is the request_headers map sent inside the LiteLLM body — these
+// come from `extra_headers` in config.yaml.
+func ResolveRequesterIP(forwarded map[string]string) (string, models.IPSource) {
+	v := lookup(forwarded, "x-forwarded-for")
+	if v == "" {
+		return "", models.IPSourceXFF
 	}
-	if v := lookup(forwarded, "x-real-ip"); v != "" {
-		v = strings.TrimSpace(v)
-		if net.ParseIP(v) != nil {
-			return v, models.IPSourceXRI
-		}
+	first := firstHop(v)
+	if first == "" || net.ParseIP(first) == nil {
+		return "", models.IPSourceXFF
 	}
-	if ip := c.ClientIP(); ip != "" && net.ParseIP(ip) != nil {
-		return ip, models.IPSourceDirect
-	}
-	return "", models.IPSourceDirect
+	return first, models.IPSourceXFF
 }
 
 func lookup(headers map[string]string, name string) string {

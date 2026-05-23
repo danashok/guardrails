@@ -107,10 +107,10 @@ func (ctrl *GuardrailController) Evaluate(c *gin.Context) {
 	start := time.Now()
 
 	identity := req.RequestData.UserAPIKeyUserID
-	ip, ipSrc := service.ResolveRequesterIP(c, req.RequestHeaders)
+	ip, ipSrc := service.ResolveRequesterIP(req.RequestHeaders)
 
-	if identity == "" || ip == "" || ipSrc == models.IPSourceDirect {
-		ctrl.logger.Warn("authorization rejected: missing identity or untrusted IP source",
+	if identity == "" || ip == "" {
+		ctrl.logger.Warn("authorization rejected: missing identity or x-forwarded-for client IP",
 			zap.String("ntaccount", identity),
 			zap.String("ip_source", string(ipSrc)),
 			zap.String("litellm_call_id", req.LiteLLMCallID),
@@ -194,7 +194,7 @@ func (ctrl *GuardrailController) recordAudit(
 		}
 	}
 
-	ip, ipSrc := service.ResolveRequesterIP(c, req.RequestHeaders)
+	ip, ipSrc := service.ResolveRequesterIP(req.RequestHeaders)
 	var ipPtr *string
 	if ip != "" {
 		ipPtr = &ip
