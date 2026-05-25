@@ -1,6 +1,10 @@
 package engine
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+	"sync"
+)
 
 var (
 	ssnRE    = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
@@ -9,8 +13,14 @@ var (
 	phoneRE  = regexp.MustCompile(`\b\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b`)
 	apiKeyRE = regexp.MustCompile(`sk-[A-Za-z0-9]{32,}`)
 
-	tsmcDomainRE = regexp.MustCompile(`(?i)\btsmc\.com\b`)
-	tsmcWordRE   = regexp.MustCompile(`(?i)\b\w*tsmc\w*\b`)
+	// Restricted-term regexes are configured at startup via InitRestrictedTerms.
+	// Default seed (tsmc) is set in init() so unit tests that import the engine
+	// without explicit initialisation still behave as before.
+	restrictedTermsMu      sync.RWMutex
+	restrictedDomainRE     *regexp.Regexp
+	restrictedWordRE       *regexp.Regexp
+	restrictedSubstringREs []*regexp.Regexp
+	restrictedTermsLower   []string
 
 	nameTitleRE = regexp.MustCompile(
 		`\b(?:Mr|Mrs|Ms|Miss|Dr|Prof|Sir|Madam|Mx)\.?\s+` +
@@ -57,3 +67,61 @@ var (
 		regexp.MustCompile(`<<SYS>>|<</SYS>>`),
 	}
 )
+
+func init() {
+	InitRestrictedTerms([]string{"tsmc"})
+}
+
+// InitRestrictedTerms compiles the regexes used both by the PII redactor
+// (word-boundary + .com-suffix variants → `[REDACTED_COMPANY]`) and by the
+// tool-checker (case-insensitive substring match). Safe to call repeatedly.
+// Empty/whitespace terms are skipped; if no usable term remains, the
+// patterns are cleared and matching becomes a no-op.
+func InitRestrictedTerms(terms []string) {
+	cleaned := make([]string, 0, len(terms))
+	for _, t := range terms {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		cleaned = append(cleaned, t)
+	}
+
+	restrictedTermsMu.Lock()
+	defer restrictedTermsMu.Unlock()
+
+	if len(cleaned) == 0 {
+		restrictedDomainRE = nil
+		restrictedWordRE = nil
+		restrictedSubstringREs = nil
+		restrictedTermsLower = nil
+		return
+	}
+
+	quoted := make([]string, len(cleaned))
+	lowered := make([]string, len(cleaned))
+	subs := make([]*regexp.Regexp, len(cleaned))
+	for i, t := range cleaned {
+		quoted[i] = regexp.QuoteMeta(t)
+		lowered[i] = strings.ToLower(t)
+		subs[i] = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(t))
+	}
+	alt := strings.Join(quoted, "|")
+
+	restrictedDomainRE = regexp.MustCompile(`(?i)\b(?:` + alt + `)\.com\b`)
+	restrictedWordRE = regexp.MustCompile(`(?i)\b\w*(?:` + alt + `)\w*\b`)
+	restrictedSubstringREs = subs
+	restrictedTermsLower = lowered
+}
+
+func snapshotRestrictedRedactors() (*regexp.Regexp, *regexp.Regexp) {
+	restrictedTermsMu.RLock()
+	defer restrictedTermsMu.RUnlock()
+	return restrictedDomainRE, restrictedWordRE
+}
+
+func snapshotRestrictedSubstrings() []*regexp.Regexp {
+	restrictedTermsMu.RLock()
+	defer restrictedTermsMu.RUnlock()
+	return restrictedSubstringREs
+}

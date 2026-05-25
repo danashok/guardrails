@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	policyPII             = "pii"
+	policyPIIAndToolCheck = "pii_and_tool_check"
 	policyPromptInjection = "prompt_injection"
 	policyAuthorization   = "authorization"
 
@@ -59,7 +59,7 @@ type LiteLLMResponse struct {
 }
 
 type GuardrailController struct {
-	pii    service.IPIIService
+	pii    service.IPIIAndToolCheckService
 	prompt service.IPromptInjectionService
 	authz  service.IAuthorizationService
 	audit  service.IGuardrailEventService
@@ -67,7 +67,7 @@ type GuardrailController struct {
 }
 
 func NewGuardrailController(
-	pii service.IPIIService,
+	pii service.IPIIAndToolCheckService,
 	prompt service.IPromptInjectionService,
 	authz service.IAuthorizationService,
 	audit service.IGuardrailEventService,
@@ -99,7 +99,7 @@ func (ctrl *GuardrailController) Evaluate(c *gin.Context) {
 	}
 
 	policy, _ := req.AdditionalProviderSpecificParams["policy"].(string)
-	if policy != policyPII && policy != policyPromptInjection {
+	if policy != policyPIIAndToolCheck && policy != policyPromptInjection {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown or missing policy"})
 		return
 	}
@@ -149,8 +149,8 @@ func (ctrl *GuardrailController) Evaluate(c *gin.Context) {
 	)
 
 	switch policy {
-	case policyPII:
-		decision, err = ctrl.pii.Evaluate(c.Request.Context(), ctrl.logger, req.Texts)
+	case policyPIIAndToolCheck:
+		decision, err = ctrl.pii.Evaluate(c.Request.Context(), ctrl.logger, req.Texts, req.Tools, req.ToolCalls)
 	case policyPromptInjection:
 		decision, err = ctrl.prompt.Evaluate(c.Request.Context(), ctrl.logger, req.Texts)
 	}

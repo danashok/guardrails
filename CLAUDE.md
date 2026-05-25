@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Go HTTP service that implements the LiteLLM `generic_guardrail_api` BETA contract. LiteLLM POSTs each chat-completions body to `POST /beta/litellm_basic_guardrail_api`; this service responds with one of three `action` values that LiteLLM interprets:
 
-- `BLOCKED` — LiteLLM rejects the request (used by `prompt_injection` policy).
-- `GUARDRAIL_INTERVENED` — LiteLLM substitutes our `texts` back into the request (used by `pii` policy after redaction).
+- `BLOCKED` — LiteLLM rejects the request (used by `prompt_injection` policy and by the tool-check pre-pass of `pii_and_tool_check`).
+- `GUARDRAIL_INTERVENED` — LiteLLM substitutes our `texts` back into the request (used by `pii_and_tool_check` after redaction).
 - `NONE` — request passes through unchanged.
 
-Policy is selected by LiteLLM via `additional_provider_specific_params.policy` in the body (`pii` or `prompt_injection`).
+Policy is selected by LiteLLM via `additional_provider_specific_params.policy` in the body (`pii_and_tool_check` or `prompt_injection`).
 
 ## Common commands
 
@@ -47,6 +47,7 @@ controller (Gin handler)
 Key boundaries:
 
 - **`internal/engine/`** owns *all* policy logic (regex compilation in `patterns.go`, dispatch in `redactor.go`, Luhn in `luhn.go`). It is intentionally the only place that knows what gets blocked or redacted; callers never see match details. Adding a new rule means editing `patterns.go` (compile the regex) and either `Redact` (for redaction) or `CheckPromptInjection` / a new `BlockKind` constant (for blocking) in `redactor.go`. Regex order in `Redact` matters — see the comment there (SSN/CC before phone; company-domain before bare-word).
+- **`pii_and_tool_check` policy** runs tool/tool_call security checks *first*, then falls through to PII redaction. The tool checks live in `internal/engine/tool_checks.go` (`CheckTools`) and cover nine block kinds in priority order (`PRIVILEGE_ESCALATION` → `REMOTE_GIT` → `EXTERNAL_NETWORK` → `DESTRUCTIVE_SHELL` → `SYSTEM_CONFIG_CHANGE` → `SENSITIVE_FILE_READ` → `EXTERNAL_FILE_READ` → `EXTERNAL_FILE_WRITE` → `RESTRICTED_TERM`). Config-driven inputs (`RESTRICTED_TERMS`, `ALLOWED_READ_ROOTS`, `ALLOWED_WRITE_ROOTS`) are wired in at startup via `engine.InitToolChecks` from `routes/router.go`. The restricted-term list also drives the PII redactor's company-token replacement (formerly hard-coded to `tsmc`), so both layers share one source of truth.
 - **Service layer** parallelises evaluation across `texts[]` using `errgroup` + `semaphore` capped by `MAX_CONCURRENT_CHECKS`. PII is always redact-only (no early exit, all texts processed). Prompt-injection short-circuits via a sentinel error (`errBlockedSentinel`) on the first match.
 - **Audit pipeline** (`guardrail_event_service.go`) is fire-and-forget: the controller calls `Submit(event)` which non-blocking-sends onto a buffered channel; a worker pool drains it. If the channel is full, events are *dropped with a warning* rather than blocking the request path. Toggle with `AUDIT_ENABLED`; tune with `AUDIT_WORKERS` / `AUDIT_BUFFER`. `Routes.Shutdown()` (deferred in `main`) closes the channel and waits for workers.
 - **`ResolveRequesterIP`** (`internal/service/ip_resolver.go`) reads `request_headers["x-forwarded-for"]` *inside the LiteLLM body* (not the inbound HTTP headers — those come from LiteLLM itself) and returns its first hop. This is the only accepted source: there is no fallback to `x-real-ip` or direct `c.ClientIP()`, because the direct peer is LiteLLM and XRI is not set end-to-end. If the header is missing, empty, or the first hop is not a valid IP, the resolver returns `""` and the controller blocks the request.

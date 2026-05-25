@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -19,22 +20,42 @@ type Decision struct {
 	Texts         []string
 }
 
-type IPIIService interface {
-	Evaluate(ctx context.Context, logger *zap.Logger, texts []string) (*Decision, error)
+type IPIIAndToolCheckService interface {
+	Evaluate(
+		ctx context.Context,
+		logger *zap.Logger,
+		texts []string,
+		rawTools, rawToolCalls json.RawMessage,
+	) (*Decision, error)
 }
 
-type piiService struct {
+type piiAndToolCheckService struct {
 	maxConcurrent int
 }
 
-func NewPIIService(maxConcurrent int) IPIIService {
+func NewPIIAndToolCheckService(maxConcurrent int) IPIIAndToolCheckService {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 32
 	}
-	return &piiService{maxConcurrent: maxConcurrent}
+	return &piiAndToolCheckService{maxConcurrent: maxConcurrent}
 }
 
-func (s *piiService) Evaluate(ctx context.Context, logger *zap.Logger, texts []string) (*Decision, error) {
+// Evaluate runs the tool-call security checks first; on a match it returns
+// BLOCKED and the PII redaction never runs. Otherwise it falls through to
+// the existing parallel PII redaction over `texts`.
+func (s *piiAndToolCheckService) Evaluate(
+	ctx context.Context,
+	logger *zap.Logger,
+	texts []string,
+	rawTools, rawToolCalls json.RawMessage,
+) (*Decision, error) {
+	if kind, rule := engine.CheckTools(rawTools, rawToolCalls); kind != "" {
+		return &Decision{
+			Action:        models.ActionBlocked,
+			BlockedReason: fmt.Sprintf("Tool call blocked (type: %s)", rule),
+		}, nil
+	}
+
 	if len(texts) == 0 {
 		return &Decision{Action: models.ActionNone}, nil
 	}

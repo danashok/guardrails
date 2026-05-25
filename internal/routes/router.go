@@ -9,6 +9,7 @@ import (
 
 	"github.com/ashokdan/guardrails/internal/config"
 	"github.com/ashokdan/guardrails/internal/controller"
+	"github.com/ashokdan/guardrails/internal/engine"
 	"github.com/ashokdan/guardrails/internal/middleware"
 	"github.com/ashokdan/guardrails/internal/repository"
 	"github.com/ashokdan/guardrails/internal/service"
@@ -29,7 +30,13 @@ type Routes struct {
 func NewRoutes(opts *RouteOptions) (*Routes, error) {
 	repo := repository.NewHandler(opts.DB)
 
-	piiSvc := service.NewPIIService(opts.Config.AppConfig.MaxConcurrent)
+	engine.InitToolChecks(
+		opts.Config.AppConfig.RestrictedTerms,
+		opts.Config.AppConfig.AllowedReadRoots,
+		opts.Config.AppConfig.AllowedWriteRoots,
+	)
+
+	piiSvc := service.NewPIIAndToolCheckService(opts.Config.AppConfig.MaxConcurrent)
 	promptSvc := service.NewPromptInjectionService(opts.Config.AppConfig.MaxConcurrent)
 
 	authzSvc := service.NewAuthorizationService(
